@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Warehouse Digital Twin</title>
+    <style>
+        :root {
+            --bg-dark: #0f172a;
+            --card-bg: #1e293b;
+            --primary: #3b82f6;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent: #10b981;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background-color: var(--bg-dark); color: var(--text-main); display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        
+        /* Header & Search */
+        header { background-color: var(--card-bg); padding: 15px; display: flex; gap: 10px; align-items: center; box-shadow: 0 4px 6px rgba(0,0,0,0.3); z-index: 10; }
+        .search-box { flex: 1; padding: 10px 15px; border-radius: 20px; border: 1px solid #334155; background: #0f172a; color: white; outline: none; }
+        .btn-scan { background: var(--primary); color: white; border: none; padding: 10px 15px; border-radius: 20px; cursor: pointer; font-weight: bold; }
+        
+        /* Main Content Area */
+        .content { flex: 1; overflow-y: auto; padding: 15px; padding-bottom: 80px; display: none; }
+        .content.active { display: block; }
+        
+        /* Map SVG */
+        .map-container { width: 100%; max-width: 500px; margin: 0 auto; background: var(--card-bg); border-radius: 10px; padding: 10px; }
+        svg { width: 100%; height: auto; }
+        .zone { cursor: pointer; transition: 0.3s; stroke: #fff; stroke-width: 2; }
+        .zone:hover { opacity: 0.7; filter: drop-shadow(0 0 8px rgba(255,255,255,0.5)); }
+        
+        /* Bottom Navigation */
+        nav { position: fixed; bottom: 0; width: 100%; background: var(--card-bg); display: flex; justify-content: space-around; padding: 15px 0; border-top: 1px solid #334155; z-index: 10; }
+        nav div { color: var(--text-muted); cursor: pointer; text-align: center; font-size: 12px; }
+        nav div.active { color: var(--primary); font-weight: bold; }
+
+        /* Modals */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 100; justify-content: center; align-items: center; padding: 20px; }
+        .modal-content { background: var(--card-bg); padding: 20px; border-radius: 12px; width: 100%; max-width: 400px; max-height: 90vh; overflow-y: auto; }
+        .btn-close { background: #ef4444; color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer; float: right; }
+        .btn-action { background: var(--primary); color: white; border: none; padding: 10px; border-radius: 5px; cursor: pointer; width: 100%; margin-top: 10px; }
+        
+        /* Cards */
+        .card { background: #334155; padding: 15px; border-radius: 8px; margin-bottom: 10px; cursor: pointer; }
+        .card h3 { color: var(--accent); margin-bottom: 5px; }
+
+        /* Forms */
+        input, select, textarea { width: 100%; padding: 10px; margin: 5px 0 15px; border-radius: 5px; border: 1px solid #475569; background: #0f172a; color: white; }
+    </style>
+</head>
+<body>
+
+    <!-- Header / Global Search -->
+    <header>
+        <input type="text" id="global-search" class="search-box" placeholder="ค้นหา SKU / ชื่อ / QR..." onkeyup="handleSearch()">
+        <button class="btn-scan" onclick="alert('เปิดกล้องสแกน QR Code')">📷 Scan</button>
+    </header>
+
+    <!-- TAB 1: LAYOUT -->
+    <div id="tab-layout" class="content active">
+        <h2 style="margin-bottom: 15px; text-align: center;">แผนผังคลังสินค้า</h2>
+        <div class="map-container">
+            <!-- 2D SVG Map (No text, click to view/edit) -->
+            <svg viewBox="0 0 400 600">
+                <!-- Plastic/Paper -->
+                <rect id="zone-plastic" class="zone" x="10" y="10" width="180" height="80" fill="#22c55e" onclick="openZone('zone-plastic', 'Plastic/Paper/Lid Cup')"/>
+                <!-- Pending -->
+                <rect id="zone-pending" class="zone" x="30" y="110" width="60" height="100" fill="#eab308" onclick="openZone('zone-pending', 'Pending Zone')"/>
+                <!-- Storage (Green Racks) -->
+                <rect id="zone-storage1" class="zone" x="120" y="110" width="20" height="100" fill="#22c55e" onclick="openZone('zone-storage1', 'Storage Rack 1')"/>
+                <rect id="zone-storage2" class="zone" x="150" y="110" width="20" height="100" fill="#22c55e" onclick="openZone('zone-storage2', 'Storage Rack 2')"/>
+                <!-- Customize Storage -->
+                <rect id="zone-custom" class="zone" x="30" y="250" width="60" height="150" fill="#0ea5e9" onclick="openZone('zone-custom', 'Customize Product Storage')"/>
+                <!-- Outbound -->
+                <rect id="zone-outbound" class="zone" x="30" y="420" width="240" height="40" fill="#f97316" onclick="openZone('zone-outbound', 'Outbound')"/>
+            </svg>
+        </div>
+    </div>
+
+    <!-- TAB 2: SEARCH RESULTS -->
+    <div id="tab-search" class="content">
+        <h2>ผลการค้นหา</h2>
+        <div id="search-results" style="margin-top: 15px;">
+            <!-- แสดงผลการค้นหาที่นี่ -->
+        </div>
+    </div>
+
+    <!-- TAB 3: STOCK -->
+    <div id="tab-stock" class="content">
+        <h2>รายการสินค้าทั้งหมด (19 building)</h2>
+        <div id="stock-list" style="margin-top: 15px;">
+            <p>กำลังรอโหลดข้อมูล...</p>
+        </div>
+    </div>
+
+    <!-- TAB 4: PRINTING -->
+    <div id="tab-printing" class="content">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+            <h2>สต๊อกงานพิมพ์</h2>
+            <button class="btn-scan" onclick="openAddPrinting()">+ เพิ่มข้อมูล</button>
+        </div>
+        <div id="printing-list">
+            <p>กำลังรอโหลดข้อมูล...</p>
+        </div>
+    </div>
+
+    <!-- BOTTOM NAVIGATION -->
+    <nav>
+        <div id="nav-layout" class="active" onclick="switchTab('layout')">🗺️<br>LAYOUT</div>
+        <div id="nav-search" onclick="switchTab('search')">🔍<br>SEARCH</div>
+        <div id="nav-stock" onclick="switchTab('stock')">📦<br>STOCK</div>
+        <div id="nav-printing" onclick="switchTab('printing')">🖨️<br>PRINTING</div>
+    </nav>
+
+    <!-- MODAL: Zone Details -->
+    <div id="modal-zone" class="modal">
+        <div class="modal-content">
+            <button class="btn-close" onclick="closeModal('modal-zone')">X</button>
+            <h2 id="modal-zone-title">ชื่อโซน</h2>
+            <button onclick="editZoneName()" style="background:none; border:none; color:var(--primary); cursor:pointer; margin-bottom: 15px;">✏️ แก้ไขชื่อโซน</button>
+            <hr style="border-color: #334155; margin-bottom: 15px;">
+            <button class="btn-action" style="background: var(--accent);" onclick="startStockCount()">📋 เริ่มนับสต๊อกโซนนี้</button>
+            <div id="zone-items" style="margin-top: 15px;">
+                <!-- Items in zone -->
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: Product Details -->
+    <div id="modal-product" class="modal">
+        <div class="modal-content">
+            <button class="btn-close" onclick="closeModal('modal-product')">X</button>
+            <h2 id="prod-name">ชื่อสินค้า</h2>
+            <p style="color: var(--text-muted);">SKU: <span id="prod-sku"></span></p>
+            <hr style="border-color: #334155; margin: 15px 0;">
+            <h3 style="color: var(--accent);">จำนวนรวมทั้งคลัง: <span id="prod-total"></span></h3>
+            <p style="margin-top: 10px;"><b>พบในโซนอื่นๆ:</b></p>
+            <ul id="prod-locations" style="margin-left: 20px; color: var(--text-muted);"></ul>
+        </div>
+    </div>
+
+    <!-- MODAL: Add/Edit Printing Form -->
+    <div id="modal-printing-form" class="modal">
+        <div class="modal-content">
+            <button class="btn-close" onclick="closeModal('modal-printing-form')">X</button>
+            <h2 id="form-printing-title">เพิ่มสต๊อกงานพิมพ์</h2>
+            <form id="printing-form" onsubmit="savePrinting(event)">
+                <label>ชื่องาน</label>
+                <input type="text" id="print-job" required>
+                
+                <label>ชื่อสินค้า</label>
+                <input type="text" id="print-prod" required>
+                
+                <div style="display: flex; gap: 10px;">
+                    <div style="flex: 1;">
+                        <label>จำนวน</label>
+                        <input type="number" id="print-qty" required>
+                    </div>
+                    <div style="flex: 1;">
+                        <label>หน่วย</label>
+                        <select id="print-unit">
+                            <option value="ลัง">ลัง</option>
+                            <option value="แพ็ค">แพ็ค</option>
+                            <option value="ชิ้น">ชิ้น</option>
+                        </select>
+                    </div>
+                </div>
+
+                <label>สถานะจัดส่ง</label>
+                <select id="print-status">
+                    <option value="ยังไม่ได้ส่ง">ยังไม่ได้ส่ง</option>
+                    <option value="ส่งแล้ว">ส่งแล้ว</option>
+                </select>
+                
+                <button type="submit" class="btn-action">💾 บันทึกข้อมูล</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- SCRIPTS -->
+    <script>
+        // ==========================================
+        // 🚨 นำ URL ที่ได้จาก GOOGLE APPS SCRIPT มาใส่ตรงนี้! 🚨
+        // ==========================================
+        const GOOGLE_API_URL = "https://script.google.com/macros/s/AKfycby52xkA6EAc6DSGHfvQK7L_JRAT8dzk5MzM1fB_DGAMTigBm3YD9IiMUXFDkYJn97e0/exec";
+        
+        let currentZoneId = "";
+        
+        // ฟังก์ชันสลับหน้า Tab
+        function switchTab(tabId) {
+            document.querySelectorAll('.content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('nav div').forEach(el => el.classList.remove('active'));
+            
+            document.getElementById('tab-' + tabId).classList.add('active');
+            document.getElementById('nav-' + tabId).classList.add('active');
+            
+            if(tabId === 'stock' || tabId === 'printing') {
+                fetchDataFromGoogle(tabId);
+            }
+        }
+
+        // เปิด Modal โซน
+        function openZone(zoneId, defaultName) {
+            currentZoneId = zoneId;
+            // ดึงชื่อโซนจาก LocalStorage (ถ้าเคยแก้ไว้)
+            let savedName = localStorage.getItem(zoneId) || defaultName;
+            document.getElementById('modal-zone-title').innerText = savedName;
+            
+            // แสดงข้อมูลจำลองไปก่อน (ระหว่างรอเชื่อม Google Sheets จริง)
+            document.getElementById('zone-items').innerHTML = `
+                <div class="card" onclick="openProductDetail('BOX-001', 'กล่องกระดาษ L', '150')">
+                    <h3>กล่องกระดาษ L</h3>
+                    <p>SKU: BOX-001 | QR: 123456</p>
+                    <p>จำนวน: 50 ลัง (คลิกดูรายละเอียด)</p>
+                </div>
+            `;
+            document.getElementById('modal-zone').style.display = 'flex';
+        }
+
+        // แก้ไขชื่อโซน
+        function editZoneName() {
+            let currentName = document.getElementById('modal-zone-title').innerText;
+            let newName = prompt("กรอกชื่อโซนใหม่:", currentName);
+            if(newName && newName.trim() !== "") {
+                document.getElementById('modal-zone-title').innerText = newName;
+                localStorage.setItem(currentZoneId, newName); // บันทึกลงเครื่อง
+                alert("บันทึกชื่อโซนเรียบร้อยแล้ว!");
+            }
+        }
+
+        // เปิดรายละเอียดสินค้า (คลิกได้จากทุกที่)
+        function openProductDetail(sku, name, total) {
+            document.getElementById('prod-name').innerText = name;
+            document.getElementById('prod-sku').innerText = sku;
+            document.getElementById('prod-total').innerText = total + " ลัง";
+            
+            // จำลองว่าสินค้านี้อยู่โซนไหนบ้าง
+            document.getElementById('prod-locations').innerHTML = `
+                <li>โซน Outbound : 100 ลัง</li>
+                <li>โซน Storage Rack 1 : 50 ลัง</li>
+            `;
+            document.getElementById('modal-product').style.display = 'flex';
+        }
+
+        // ดึงข้อมูลจาก Google Sheets (Phase 3)
+        async function fetchDataFromGoogle(tabId) {
+            if(GOOGLE_API_URL === "https://script.google.com/macros/s/AKfycby52xkA6EAc6DSGHfvQK7L_JRAT8dzk5MzM1fB_DGAMTigBm3YD9IiMUXFDkYJn97e0/exec") {
+                console.log("กรุณาใส่ URL ของ Google Apps Script ก่อน");
+                return; // หยุดทำงานถ้ายังไม่ใส่ URL
+            }
+            
+            try {
+                let sheetName = (tabId === 'stock') ? '19 building' : 'งานพิมพ์';
+                document.getElementById(tabId + '-list').innerHTML = "<p>กำลังโหลดข้อมูลจาก Google Sheets...</p>";
+                
+                let response = await fetch(`${GOOGLE_API_URL}?sheet=${sheetName}`);
+                let data = await response.json();
+                
+                // นำ Data ไปแสดงผลเป็น Card (เดี๋ยวเราจะเขียนโค้ด Render แบบละเอียดในสเตปต่อไป)
+                document.getElementById(tabId + '-list').innerHTML = `<p>โหลดข้อมูลสำเร็จ จำนวน ${data.length} รายการ!</p>`;
+                console.log(data);
+                
+            } catch (error) {
+                document.getElementById(tabId + '-list').innerHTML = "<p>เกิดข้อผิดพลาดในการโหลดข้อมูล</p>";
+            }
+        }
+
+        // ปิด Modal
+        function closeModal(modalId) { document.getElementById(modalId).style.display = 'none'; }
+        
+        // เปิดฟอร์มเพิ่มงานพิมพ์
+        function openAddPrinting() {
+            document.getElementById('printing-form').reset();
+            document.getElementById('modal-printing-form').style.display = 'flex';
+        }
+        
+        // จำลองการนับสต๊อก
+        function startStockCount() {
+            let zoneName = document.getElementById('modal-zone-title').innerText;
+            alert("เข้าสู่โหมดนับสต๊อกสำหรับ: " + zoneName + "\n(เปิดกล้องสแกนยิงต่อเนื่องได้เลย)");
+        }
+    </script>
+</body>
+</html>
